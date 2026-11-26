@@ -3,7 +3,7 @@
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/PauseLayer.hpp>
 #include <algorithm>
-#include <fstream>
+#include <sstream>
 #include <vector>
 
 using namespace geode::prelude;
@@ -27,15 +27,18 @@ static auto macroPath() {
 }
 
 static void saveMacro() {
-    std::ofstream out(macroPath());
+    std::ostringstream out;
     for (auto const& a : g_actions) {
         out << a.frame << ' ' << a.button << ' ' << a.down << ' ' << a.player1 << '\n';
     }
+    (void) utils::file::writeString(macroPath(), out.str());
 }
 
 static void loadMacro() {
     g_actions.clear();
-    std::ifstream in(macroPath());
+    auto res = utils::file::readString(macroPath());
+    if (!res) return;
+    std::istringstream in(res.unwrap());
     int f, b, d, p;
     while (in >> f >> b >> d >> p) {
         g_actions.push_back({f, b, d != 0, p != 0});
@@ -49,21 +52,21 @@ class $modify(MacroGameLayer, GJBaseGameLayer) {
         if (g_mode == Mode::Play) return;
 
         if (g_mode == Mode::Record) {
-            g_actions.push_back({m_gameState.m_currentProgress, button, down, isPlayer1});
+            g_actions.push_back({static_cast<int>(m_gameState.m_currentProgress), button, down, isPlayer1});
         }
         GJBaseGameLayer::handleButton(down, button, isPlayer1);
     }
 
-    void processCommands(float dt) {
+    void processCommands(float dt, bool isHalfTick, bool isLastTick) {
         if (g_mode == Mode::Play) {
-            int frame = m_gameState.m_currentProgress;
+            int frame = static_cast<int>(m_gameState.m_currentProgress);
             while (g_next < g_actions.size() && g_actions[g_next].frame <= frame) {
                 auto const& a = g_actions[g_next++];
                 // Calls the original game function directly
                 GJBaseGameLayer::handleButton(a.down, a.button, a.player1);
             }
         }
-        GJBaseGameLayer::processCommands(dt);
+        GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
     }
 };
 
@@ -71,7 +74,7 @@ class $modify(MacroGameLayer, GJBaseGameLayer) {
 class $modify(MacroPlayLayer, PlayLayer) {
     void resetLevel() {
         PlayLayer::resetLevel();
-        int f = m_gameState.m_currentProgress;
+        int f = static_cast<int>(m_gameState.m_currentProgress);
 
         if (g_mode == Mode::Record) {
             // Throw away anything recorded after the respawn point
