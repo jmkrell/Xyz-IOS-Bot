@@ -1,100 +1,127 @@
-/**
- * Include the Geode headers.
- */
 #include <Geode/Geode.hpp>
+#include <Geode/modify/GJBaseGameLayer.hpp>
+#include <Geode/modify/PlayLayer.hpp>
+#include <Geode/modify/PauseLayer.hpp>
+#include <algorithm>
+#include <fstream>
+#include <vector>
 
-/**
- * Brings cocos2d and all Geode namespaces to the current scope.
- */
 using namespace geode::prelude;
 
-/**
- * `$modify` lets you extend and modify GD's classes.
- * To hook a function in Geode, simply $modify the class
- * and write a new function definition with the signature of
- * the function you want to hook.
- *
- * Here we use the overloaded `$modify` macro to set our own class name,
- * so that we can use it for button callbacks.
- *
- * Notice the header being included, you *must* include the header for
- * the class you are modifying, or you will get a compile error.
- *
- * Another way you could do this is like this:
- *
- * struct MyMenuLayer : Modify<MyMenuLayer, MenuLayer> {};
- */
-#include <Geode/modify/MenuLayer.hpp>
-class $modify(MyMenuLayer, MenuLayer) {
-	/**
-	 * Typically classes in GD are initialized using the `init` function, (though not always!),
-	 * so here we use it to add our own button to the bottom menu.
-	 *
-	 * Note that for all hooks, your signature has to *match exactly*,
-	 * `void init()` would not place a hook!
-	*/
-	bool init() {
-		/**
-		 * We call the original init function so that the
-		 * original class is properly initialized.
-		 */
-		if (!MenuLayer::init()) {
-			return false;
-		}
+// ---------- Shared macro state ----------
+enum class Mode { Off, Record, Play };
 
-		/**
-		 * You can use methods from the `geode::log` namespace to log messages to the console,
-		 * being useful for debugging and such. See this page for more info about logging:
-		 * https://docs.geode-sdk.org/tutorials/logging
-		*/
-		log::debug("Hello from my MenuLayer::init hook! This layer has {} children.", this->getChildrenCount());
+struct Action {
+    int frame;    // physics step when the click happened
+    int button;   // which button (1 = jump)
+    bool down;    // true = pressed, false = released
+    bool player1; // true = player 1, false = player 2
+};
 
-		/**
-		 * See this page for more info about buttons
-		 * https://docs.geode-sdk.org/tutorials/buttons
-		*/
-		auto myButton = CCMenuItemSpriteExtra::create(
-			CCSprite::createWithSpriteFrameName("GJ_likeBtn_001.png"),
-			this,
-			/**
-			 * Here we use the name we set earlier for our modify class.
-			*/
-			menu_selector(MyMenuLayer::onMyButton)
-		);
+static Mode g_mode = Mode::Off;
+static std::vector<Action> g_actions;
+static size_t g_next = 0; // next action to replay
 
-		/**
-		 * Here we access the `bottom-menu` node by its ID, and add our button to it.
-		 * Node IDs are a Geode feature, see this page for more info about it:
-		 * https://docs.geode-sdk.org/tutorials/nodetree
-		*/
-		auto menu = this->getChildByID("bottom-menu");
-		menu->addChild(myButton);
+static auto macroPath() {
+    return Mod::get()->getSaveDir() / "macro.txt";
+}
 
-		/**
-		 * The `_spr` string literal operator just prefixes the string with
-		 * your mod id followed by a slash. This is good practice for setting your own node ids.
-		*/
-		myButton->setID("my-button"_spr);
+static void saveMacro() {
+    std::ofstream out(macroPath());
+    for (auto const& a : g_actions) {
+        out << a.frame << ' ' << a.button << ' ' << a.down << ' ' << a.player1 << '\n';
+    }
+}
 
-		/**
-		 * We update the layout of the menu to ensure that our button is properly placed.
-		 * This is yet another Geode feature, see this page for more info about it:
-		 * https://docs.geode-sdk.org/tutorials/layouts
-		*/
-		menu->updateLayout();
+static void loadMacro() {
+    g_actions.clear();
+    std::ifstream in(macroPath());
+    int f, b, d, p;
+    while (in >> f >> b >> d >> p) {
+        g_actions.push_back({f, b, d != 0, p != 0});
+    }
+}
 
-		/**
-		 * We return `true` to indicate that the class was properly initialized.
-		 */
-		return true;
-	}
+// ---------- Recording + replaying clicks ----------
+class $modify(MacroGameLayer, GJBaseGameLayer) {
+    void handleButton(bool down, int button, bool isPlayer1) {
+        // While replaying, ignore your real taps
+        if (g_mode == Mode::Play) return;
 
-	/**
-	 * This is the callback function for the button we created earlier.
-	 * The signature for button callbacks must always be the same,
-	 * return type `void` and taking a `CCObject*`.
-	*/
-	void onMyButton(CCObject*) {
-		FLAlertLayer::create("Geode", "Hello from my custom mod!", "OK")->show();
-	}
+        if (g_mode == Mode::Record) {
+            g_actions.push_back({m_gameState.m_currentProgress, button, down, isPlayer1});
+        }
+        GJBaseGameLayer::handleButton(down, button, isPlayer1);
+    }
+
+    void processCommands(float dt) {
+        if (g_mode == Mode::Play) {
+            int frame = m_gameState.m_currentProgress;
+            while (g_next < g_actions.size() && g_actions[g_next].frame <= frame) {
+                auto const& a = g_actions[g_next++];
+                // Calls the original game function directly
+                GJBaseGameLayer::handleButton(a.down, a.button, a.player1);
+            }
+        }
+        GJBaseGameLayer::processCommands(dt);
+    }
+};
+
+// ---------- Handle dying / restarting ----------
+class $modify(MacroPlayLayer, PlayLayer) {
+    void resetLevel() {
+        PlayLayer::resetLevel();
+        int f = m_gameState.m_currentProgress;
+
+        if (g_mode == Mode::Record) {
+            // Throw away anything recorded after the respawn point
+            std::erase_if(g_actions, [f](Action const& a) { return a.frame >= f; });
+        }
+        if (g_mode == Mode::Play) {
+            // Start replay again from the respawn point
+            g_next = std::lower_bound(
+                g_actions.begin(), g_actions.end(), f,
+                [](Action const& a, int frame) { return a.frame < frame; }
+            ) - g_actions.begin();
+        }
+    }
+};
+
+// ---------- Buttons in the pause menu ----------
+class $modify(MacroPauseLayer, PauseLayer) {
+    void customSetup() {
+        PauseLayer::customSetup();
+
+        auto winSize = CCDirector::get()->getWinSize();
+        auto menu = CCMenu::create();
+        menu->setPosition({winSize.width - 60.f, 90.f});
+
+        auto makeBtn = [&](char const* text, float y, std::function<void()> fn) {
+            auto spr = ButtonSprite::create(text, 80, true, "bigFont.fnt", "GJ_button_01.png", 30.f, 0.5f);
+            auto btn = CCMenuItemExt::createSpriteExtra(spr, [fn](CCMenuItemSpriteExtra*) { fn(); });
+            btn->setPosition({0.f, y});
+            menu->addChild(btn);
+        };
+
+        makeBtn("Record", 70.f, [] {
+            g_mode = Mode::Record;
+            g_actions.clear();
+            Notification::create("Recording! Restart the level.", NotificationIcon::Success)->show();
+        });
+
+        makeBtn("Play", 35.f, [] {
+            if (g_actions.empty()) loadMacro();
+            g_mode = Mode::Play;
+            g_next = 0;
+            Notification::create("Playback! Restart the level.", NotificationIcon::Success)->show();
+        });
+
+        makeBtn("Stop", 0.f, [] {
+            if (g_mode == Mode::Record) saveMacro();
+            g_mode = Mode::Off;
+            Notification::create("Stopped (macro saved)", NotificationIcon::Info)->show();
+        });
+
+        this->addChild(menu);
+    }
 };
