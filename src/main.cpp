@@ -28,8 +28,8 @@ class $modify(FpsMenuLayer, MenuLayer) {
 
 // ...and when a level starts
 class $modify(FpsPlayLayer, PlayLayer) {
-	bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
-		if (!PlayLayer::init(level, useReplay, dontCreateObjects)) return false;
+	bool init(GJGameLevel* level, bool dontCreateObjects) {
+		if (!PlayLayer::init(level, dontCreateObjects)) return false;
 		applyFps();
 		return true;
 	}
