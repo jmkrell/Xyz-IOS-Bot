@@ -1,14 +1,21 @@
 {
 	"geode": "6.0.0",
 	"gd": {
-		"win": "2.2091",
-		"android": "2.2091",
-		"mac": "2.2091",
 		"ios": "2.2091"
 	},
-	"id": "zreliegmd.ibot-yz",
-	"name": "iBot YZ",
 	"version": "v1.0.0",
-	"developer": "ZrelieGMD",
-	"description": "Record your clicks and replay them."
+	"id": "Zrelie.ios-fps-unlock",
+	"name": "iOS FPS Unlock",
+	"developer": "zrelie",
+	"description": "Lets you pick your FPS (60, 90, 120 or custom) on iOS.",
+	"settings": {
+		"fps": {
+			"type": "int",
+			"name": "FPS",
+			"description": "How many frames per second the game runs at. Try 60, 90 or 120.",
+			"default": 120,
+			"min": 30,
+			"max": 240
+		}
+	}
 }
