@@ -4,7 +4,7 @@
 		"ios": "2.2091"
 	},
 	"version": "v1.0.0",
-	"id": "Zrelie.ios-fps-unlock",
+	"id": "zrelie.ios-fps-unlock",
 	"name": "iOS FPS Unlock",
 	"developer": "zrelie",
 	"description": "Lets you pick your FPS (60, 90, 120 or custom) on iOS.",
